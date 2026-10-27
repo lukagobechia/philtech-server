@@ -1,4 +1,5 @@
 import { Column, Entity, Index, JoinColumn, OneToOne, type Relation } from 'typeorm';
+import { encrypted } from '../lib/field-encryption.js';
 import { BaseEntity } from './base.entity.js';
 import { JobApplication } from './job-application.entity.js';
 
@@ -12,18 +13,27 @@ export type ScheduleBlock = { weekday: number; start: string; end: string };
 
 @Entity({ name: 'employees' })
 export class Employee extends BaseEntity {
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'text', transformer: encrypted })
   firstName!: string;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'text', transformer: encrypted })
   lastName!: string;
 
-  @Index({ unique: true })
-  @Column({ type: 'varchar', length: 320 })
+  @Column({ type: 'text', transformer: encrypted })
   email!: string;
 
+  // Keyed hash of the lowercased email, set on save: keeps emails unique and findable while encrypted.
+  @Index('UQ_employees_email_hash', { unique: true })
+  @Column({ type: 'varchar', length: 32, select: false })
+  emailHash!: string;
+
+  // Blind index for admin search over the encrypted fields, set on save; never returned.
+  @Index('IDX_employees_search_index', { synchronize: false })
+  @Column({ type: 'text', array: true, default: () => "'{}'", select: false })
+  searchIndex!: string[];
+
   // E.164
-  @Column({ type: 'varchar', length: 32, nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   phone!: string | null;
 
   @Column({ type: 'varchar', length: 160 })
@@ -43,7 +53,7 @@ export class Employee extends BaseEntity {
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   schedule!: ScheduleBlock[];
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   notes!: string | null;
 
   // Set when the employee was hired through an application; null for manual additions.

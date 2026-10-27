@@ -1,4 +1,5 @@
 import { Column, Entity, Index } from 'typeorm';
+import { encrypted } from '../lib/field-encryption.js';
 import { BaseEntity } from './base.entity.js';
 import { Locale } from './enums.js';
 
@@ -17,24 +18,28 @@ export enum ContactService {
 
 @Entity({ name: 'contact_messages' })
 export class ContactMessage extends BaseEntity {
-  @Column({ type: 'varchar', length: 160 })
+  @Column({ type: 'text', transformer: encrypted })
   name!: string;
 
-  @Index()
-  @Column({ type: 'varchar', length: 320 })
+  @Column({ type: 'text', transformer: encrypted })
   email!: string;
 
-  @Column({ type: 'varchar', length: 32, nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   phone!: string | null;
 
-  @Column({ type: 'varchar', length: 160, nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   company!: string | null;
 
   @Column({ type: 'enum', enum: ContactService, nullable: true })
   service!: ContactService | null;
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', transformer: encrypted })
   message!: string;
+
+  // Blind index for admin search over the encrypted fields, set on save; never returned.
+  @Index('IDX_contact_messages_search_index', { synchronize: false })
+  @Column({ type: 'text', array: true, default: () => "'{}'", select: false })
+  searchIndex!: string[];
 
   @Column({ type: 'enum', enum: Locale, default: Locale.EN })
   locale!: Locale;

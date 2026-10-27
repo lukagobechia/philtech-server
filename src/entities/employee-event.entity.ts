@@ -1,4 +1,5 @@
 import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn, type Relation } from 'typeorm';
+import { encryptedJson } from '../lib/field-encryption.js';
 import { AdminUser } from './admin-user.entity.js';
 import { Employee } from './employee.entity.js';
 
@@ -35,7 +36,8 @@ export class EmployeeEvent {
   @Column({ type: 'enum', enum: EmployeeEventType })
   type!: EmployeeEventType;
 
-  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  // Encrypted: field changes include before/after names, emails and phones.
+  @Column({ type: 'text', transformer: encryptedJson })
   data!: Record<string, unknown>;
 
   // Null for automatic actions, e.g. overtime ending at its planned time.

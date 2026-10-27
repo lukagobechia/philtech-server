@@ -8,6 +8,7 @@ import { Employee, EmployeeStatus, type ScheduleBlock } from "../../entities/emp
 import type { JobApplication } from "../../entities/job-application.entity.js";
 import { OvertimeEntry, OvertimeStatus } from "../../entities/overtime-entry.entity.js";
 import { HttpError } from "../../lib/http-error.js";
+import { lookupHash, searchQueryTerms } from "../../lib/field-encryption.js";
 import { dayRange, likePattern } from "../../lib/listing.js";
 import { paginated, toSkipTake, type Pagination } from "../../lib/pagination.js";
 import { schemas } from "../../lib/schemas.js";
@@ -147,6 +148,10 @@ async function employeeOrThrow(manager: EntityManager, id: string): Promise<Empl
     return employee;
 }
 
+/** By last name, then first name. Done in code because names are stored encrypted. */
+export const sortByName = <T extends { firstName: string; lastName: string; id: string }>(rows: T[]): T[] =>
+    rows.sort((a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName) || a.id.localeCompare(b.id));
+
 async function activeOvertimeFor(employeeIds: string[]): Promise<Map<string, OvertimeEntry>> {
     if (!employeeIds.length) return new Map();
     const rows = await overtimeEntries().findBy({ employeeId: In(employeeIds), status: OvertimeStatus.ACTIVE });
@@ -154,7 +159,7 @@ async function activeOvertimeFor(employeeIds: string[]): Promise<Map<string, Ove
 }
 
 async function assertEmailFree(manager: EntityManager, email: string, exceptId?: string) {
-    const existing = await manager.getRepository(Employee).findOne({ where: { email }, select: { id: true } });
+    const existing = await manager.getRepository(Employee).findOne({ where: { emailHash: lookupHash(email) }, select: { id: true } });
     if (existing && existing.id !== exceptId) throw HttpError.conflict("EMAIL_TAKEN", "An employee with this email already exists");
 }
 
@@ -182,22 +187,31 @@ export async function listEmployees(query: EmployeeListQuery) {
     if (query.department) qb.andWhere("e.department = :department", { department: query.department });
     if (query.applicationId) qb.andWhere("e.applicationId = :applicationId", { applicationId: query.applicationId });
     if (query.q) {
+        const terms = searchQueryTerms(query.q);
         qb.andWhere(
-            new Brackets((inner) =>
-                ["firstName", "lastName", "email", "position", "department", "jobCode"].forEach((column, index) =>
+            new Brackets((inner) => {
+                ["position", "department", "jobCode"].forEach((column, index) =>
                     index ? inner.orWhere(`e.${column} ILIKE :like`) : inner.where(`e.${column} ILIKE :like`),
-                ),
-            ),
+                );
+                // Names and email are encrypted; their words are matched through the search index.
+                if (terms.length) inner.orWhere("e.searchIndex @> ARRAY[:...terms]::text[]", { terms });
+            }),
             { like: likePattern(query.q) },
         );
     }
-    if (query.sort === "name") qb.orderBy("e.lastName", "ASC").addOrderBy("e.firstName", "ASC");
-    else if (query.sort === "startDate") qb.orderBy("e.startDate", "DESC");
-    else qb.orderBy("e.createdAt", "DESC");
-    qb.addOrderBy("e.id", "ASC");
-
     const { skip, take } = toSkipTake(query);
-    const [items, total] = await qb.skip(skip).take(take).getManyAndCount();
+    let items: Employee[];
+    let total: number;
+    if (query.sort === "name") {
+        // Names are encrypted, so this sort happens after decrypting.
+        const all = sortByName(await qb.getMany());
+        [items, total] = [all.slice(skip, skip + take), all.length];
+    } else {
+        if (query.sort === "startDate") qb.orderBy("e.startDate", "DESC");
+        else qb.orderBy("e.createdAt", "DESC");
+        qb.addOrderBy("e.id", "ASC");
+        [items, total] = await qb.skip(skip).take(take).getManyAndCount();
+    }
     const overtime = await activeOvertimeFor(items.map((item) => item.id));
     return paginated(items.map((item) => withPresence(item, overtime)), total, query);
 }
@@ -232,7 +246,7 @@ export async function hireFromApplication(manager: EntityManager, application: J
         return linked;
     }
 
-    const byEmail = await repository.findOneBy({ email: application.email });
+    const byEmail = await repository.findOneBy({ emailHash: lookupHash(application.email) });
     const employee = byEmail
         ? await repository.save({ ...byEmail, applicationId: byEmail.applicationId ?? application.id, jobCode: byEmail.jobCode ?? application.jobCode, status: EmployeeStatus.ACTIVE })
         : await repository.save({
@@ -257,7 +271,8 @@ export async function updateEmployee(id: string, input: z.infer<typeof updateEmp
     return AppDataSource.transaction(async (manager) => {
         const existing = await employeeOrThrow(manager, id);
         if (input.email && input.email !== existing.email) await assertEmailFree(manager, input.email, id);
-        await manager.getRepository(Employee).update(id, input);
+        // A full save, not update(), so the search index is rebuilt from the whole row.
+        await manager.getRepository(Employee).save({ ...existing, ...input });
 
         const { schedule, status, ...fields } = input;
         const changed = Object.keys(fields).filter((key) => fields[key as keyof typeof fields] !== existing[key as keyof Employee]);
@@ -283,7 +298,7 @@ export async function updateEmployee(id: string, input: z.infer<typeof updateEmp
 
 /** Everyone active, with who is working, on overtime or off right now. */
 export async function employeeBoard(now = new Date()) {
-    const active = await employees().find({ where: { status: EmployeeStatus.ACTIVE }, order: { lastName: "ASC", firstName: "ASC" } });
+    const active = sortByName(await employees().findBy({ status: EmployeeStatus.ACTIVE }));
     const overtime = await activeOvertimeFor(active.map((employee) => employee.id));
     const items = active.map((employee) => withPresence(employee, overtime, now));
     const count = (state: Presence["state"]) => items.filter((item) => item.presence?.state === state).length;

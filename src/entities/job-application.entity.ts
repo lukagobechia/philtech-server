@@ -6,6 +6,7 @@ import {
   ManyToOne,
   type Relation,
 } from 'typeorm';
+import { encrypted } from '../lib/field-encryption.js';
 import { BaseEntity } from './base.entity.js';
 import { Locale } from './enums.js';
 import { Job } from './job.entity.js';
@@ -37,38 +38,42 @@ export class JobApplication extends BaseEntity {
   @Column({ type: 'varchar', length: 160 })
   jobTitle!: string;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'text', transformer: encrypted })
   firstName!: string;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'text', transformer: encrypted })
   lastName!: string;
 
-  @Column({ type: 'varchar', length: 160 })
+  @Column({ type: 'text', transformer: encrypted })
   city!: string;
 
   // ISO 3166-1 alpha-2
   @Column({ type: 'varchar', length: 2 })
   country!: string;
 
-  @Column({ type: 'varchar', length: 160, nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   currentEmployer!: string | null;
 
-  @Column({ type: 'varchar', length: 160, nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   currentPosition!: string | null;
 
-  @Index()
-  @Column({ type: 'varchar', length: 320 })
+  @Column({ type: 'text', transformer: encrypted })
   email!: string;
 
   // E.164
-  @Column({ type: 'varchar', length: 32 })
+  @Column({ type: 'text', transformer: encrypted })
   phone!: string;
+
+  // Blind index for admin search over the encrypted fields, set on save; never returned.
+  @Index('IDX_job_applications_search_index', { synchronize: false })
+  @Column({ type: 'text', array: true, default: () => "'{}'", select: false })
+  searchIndex!: string[];
 
   // Object key in the private resume bucket, never a public URL.
   @Column({ type: 'varchar', length: 500 })
   resumeKey!: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'text', transformer: encrypted })
   resumeFileName!: string;
 
   @Column({ type: 'varchar', length: 100 })

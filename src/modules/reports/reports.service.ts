@@ -1,10 +1,12 @@
 import { AppDataSource } from "../../config/database.js";
 import { Locale } from "../../entities/enums.js";
 import { Job } from "../../entities/job.entity.js";
+import { decryptRows } from "../../lib/field-encryption.js";
 import { dayRange } from "../../lib/listing.js";
 import type { CellValue, Sheet } from "../../lib/spreadsheet.js";
 import { filteredAuditLogs, type AuditFilters } from "../audit/audit.routes.js";
 import { getDashboard, type DateRange } from "../dashboard/dashboard.service.js";
+import { sortByName } from "../employees/employees.service.js";
 import { adminJobStatus, pickTranslation } from "../jobs/jobs.service.js";
 
 export const REPORT_TYPES = ["overview", "applications", "interviews", "jobs", "messages", "bookings", "employees", "overtime", "audit"] as const;
@@ -32,6 +34,7 @@ async function applicationsSheet({ start, end }: Range, statuses?: string[]): Pr
          ORDER BY a."createdAt" DESC LIMIT ${MAX_REPORT_ROWS}`,
         statuses ? [start, end, statuses] : [start, end],
     );
+    decryptRows(rows, ["firstName", "lastName", "email", "phone", "city", "currentEmployer", "currentPosition"]);
     return {
         name: "Applications",
         columns: [
@@ -61,13 +64,14 @@ async function applicationsSheet({ start, end }: Range, statuses?: string[]): Pr
 async function interviewsSheet({ start, end }: Range, statuses?: string[]): Promise<Sheet> {
     const rows: Record<string, CellValue>[] = await AppDataSource.query(
         `SELECT i."startsAt", i.title, i."durationMinutes", i.status, i."meetingUrl", i.notes,
-                a."firstName" || ' ' || a."lastName" AS candidate, a.email, a."jobCode", a."jobTitle",
+                a."firstName", a."lastName", a.email, a."jobCode", a."jobTitle",
                 jsonb_array_length(i.attachments)::int AS files
          FROM interviews i JOIN job_applications a ON a.id = i.application_id
          WHERE i."startsAt" >= $1 AND i."startsAt" < $2 ${statuses ? `AND i.status::text = ANY($3)` : ""}
          ORDER BY i."startsAt" ASC LIMIT ${MAX_REPORT_ROWS}`,
         statuses ? [start, end, statuses] : [start, end],
     );
+    decryptRows(rows, ["firstName", "lastName", "email", "notes"]);
     return {
         name: "Interviews",
         columns: [
@@ -84,7 +88,7 @@ async function interviewsSheet({ start, end }: Range, statuses?: string[]): Prom
             { header: "Notes", width: 40 },
         ],
         rows: rows.map((row) => [
-            row.startsAt as Date, row.title, row.candidate, row.email, row.jobCode, row.jobTitle, row.durationMinutes,
+            row.startsAt as Date, row.title, `${row.firstName} ${row.lastName}`, row.email, row.jobCode, row.jobTitle, row.durationMinutes,
             humanize(row.status as string), row.meetingUrl, row.files, row.notes,
         ]),
     };
@@ -145,6 +149,7 @@ async function messagesSheet({ start, end }: Range, statuses?: string[]): Promis
          ORDER BY "createdAt" DESC LIMIT ${MAX_REPORT_ROWS}`,
         statuses ? [start, end, statuses] : [start, end],
     );
+    decryptRows(rows, ["name", "email", "phone", "company", "message"]);
     return {
         name: "Messages",
         columns: [
@@ -173,6 +178,7 @@ async function bookingsSheet({ start, end }: Range, statuses?: string[]): Promis
          ORDER BY "startsAt" ASC LIMIT ${MAX_REPORT_ROWS}`,
         statuses ? [start, end, statuses] : [start, end],
     );
+    decryptRows(rows, ["name", "email", "phone", "notes"]);
     return {
         name: "Call bookings",
         columns: [
@@ -200,16 +206,18 @@ const blockMinutes = (block: { start: string; end: string }) =>
     Number(block.end.slice(0, 2)) * 60 + Number(block.end.slice(3)) - (Number(block.start.slice(0, 2)) * 60 + Number(block.start.slice(3)));
 
 async function employeesSheet({ start, end }: Range, statuses?: string[]): Promise<Sheet> {
-    const rows: (Record<string, CellValue> & { schedule: { weekday: number; start: string; end: string }[] })[] = await AppDataSource.query(
-        `SELECT e."firstName", e."lastName", e.email, e.phone, e.position, e.department, e."startDate"::text AS "startDate", e.status, e."jobCode",
+    type Row = Record<string, CellValue> & { id: string; firstName: string; lastName: string; schedule: { weekday: number; start: string; end: string }[] };
+    const rows: Row[] = await AppDataSource.query(
+        `SELECT e.id, e."firstName", e."lastName", e.email, e.phone, e.position, e.department, e."startDate"::text AS "startDate", e.status, e."jobCode",
                 e.application_id IS NOT NULL AS hired_via_application, e.schedule,
                 coalesce((SELECT sum(extract(epoch FROM coalesce(o."endedAt", now()) - o."startedAt")) / 60
                           FROM overtime_entries o
                           WHERE o.employee_id = e.id AND o.status <> 'cancelled' AND o."startedAt" >= $1 AND o."startedAt" < $2), 0)::float AS overtime_minutes
          FROM employees e ${statuses ? `WHERE e.status::text = ANY($3)` : ""}
-         ORDER BY e."lastName", e."firstName" LIMIT ${MAX_REPORT_ROWS}`,
+         ORDER BY e."createdAt" LIMIT ${MAX_REPORT_ROWS}`,
         statuses ? [start, end, statuses] : [start, end],
     );
+    sortByName(decryptRows(rows, ["firstName", "lastName", "email", "phone"]));
     return {
         name: "Employees",
         columns: [
@@ -239,7 +247,7 @@ async function employeesSheet({ start, end }: Range, statuses?: string[]): Promi
 async function overtimeSheet({ start, end }: Range, statuses?: string[]): Promise<Sheet> {
     const rows: Record<string, CellValue>[] = await AppDataSource.query(
         `SELECT o."startedAt", o."endedAt", o."plannedEndAt", o.reason, o.status,
-                e."firstName" || ' ' || e."lastName" AS employee, e.position,
+                e."firstName", e."lastName", e.position,
                 s."displayName" AS started_by, x."displayName" AS ended_by,
                 CASE WHEN o.status = 'cancelled' THEN 0
                      ELSE extract(epoch FROM coalesce(o."endedAt", now()) - o."startedAt") / 60 END::float AS minutes
@@ -251,6 +259,7 @@ async function overtimeSheet({ start, end }: Range, statuses?: string[]): Promis
          ORDER BY o."startedAt" DESC LIMIT ${MAX_REPORT_ROWS}`,
         statuses ? [start, end, statuses] : [start, end],
     );
+    decryptRows(rows, ["firstName", "lastName"]);
     return {
         name: "Overtime",
         columns: [
@@ -267,7 +276,7 @@ async function overtimeSheet({ start, end }: Range, statuses?: string[]): Promis
         ],
         rows: rows.map((row) => [
             row.startedAt as Date, row.endedAt as Date | null, row.plannedEndAt as Date | null, hours(Number(row.minutes)),
-            row.employee, row.position, row.reason, row.status === "active" ? "In progress" : humanize(row.status as string),
+            `${row.firstName} ${row.lastName}`, row.position, row.reason, row.status === "active" ? "In progress" : humanize(row.status as string),
             row.started_by, row.endedAt && !row.ended_by && row.status === "completed" ? "Automatic (planned end)" : row.ended_by,
         ]),
     };

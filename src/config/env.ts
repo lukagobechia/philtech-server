@@ -14,6 +14,10 @@ const csv = z
             .filter(Boolean),
     );
 
+const encryptionKey = z
+    .string()
+    .refine((value) => Buffer.from(value, "base64").length === 32, "Must be 32 bytes, base64-encoded");
+
 const envSchema = z.object({
     NODE_ENV: z
         .enum(["development", "test", "production"])
@@ -37,6 +41,13 @@ const envSchema = z.object({
 
     // Secret used to hash client IPs before storing them.
     IP_HASH_SECRET: z.string().min(16),
+
+    // AES-256-GCM key for personal data stored in the database (openssl rand -base64 32).
+    DATA_ENCRYPTION_KEY: encryptionKey,
+    // Retired keys, kept only to read rows written before a rotation.
+    DATA_ENCRYPTION_PREVIOUS_KEYS: csv.pipe(z.array(encryptionKey)).default([]),
+    // HMAC key for the search index over encrypted fields. Changing it requires re-indexing.
+    DATA_INDEX_KEY: z.string().min(32),
 
     SESSION_TTL_HOURS: z.coerce.number().int().min(1).default(12),
     SESSION_COOKIE_NAME: z.string().default("pt_session"),

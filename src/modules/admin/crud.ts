@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { EntityManager, EntityTarget, ObjectLiteral, SelectQueryBuilder } from "typeorm";
 import { AppDataSource } from "../../config/database.js";
 import { HttpError } from "../../lib/http-error.js";
+import { encrypted, searchQueryTerms } from "../../lib/field-encryption.js";
 import { dateRangeQuery, dayRange, enumList, grouped, likePattern, searchQuery, type GroupCount } from "../../lib/listing.js";
 import { paginated, paginationQuery, toSkipTake } from "../../lib/pagination.js";
 import { schemas } from "../../lib/schemas.js";
@@ -15,6 +16,7 @@ type Options<E extends ObjectLiteral> = {
     // Entity name in the audit log, e.g. "application" -> "application.status_changed".
     auditEntity: string;
     statusEnum: Record<string, string>;
+    // Plaintext columns matched as substrings; encrypted ones are searched through the entity's searchIndex.
     searchColumns: string[];
     // Extra equality filters allowed on the list query, e.g. { jobId: schemas.uuid }.
     filters?: Record<string, z.ZodType>;
@@ -47,6 +49,8 @@ export function adminCrudRouter<E extends ObjectLiteral>(options: Options<E>): R
     const sortKeys = Object.keys(sorts) as [string, ...string[]];
     const dateColumn = options.dateColumn ?? "createdAt";
     const groupColumns = ["status", ...(options.groupBy ?? [])] as [string, ...string[]];
+    const hasSearchIndex = () => Boolean(repository().metadata.findColumnWithPropertyName("searchIndex"));
+    const isEncrypted = (column: string) => repository().metadata.findColumnWithPropertyName(column)?.transformer === encrypted;
 
     const filterQuery = z.object({
         // One status or several, comma-separated.
@@ -65,7 +69,11 @@ export function adminCrudRouter<E extends ObjectLiteral>(options: Options<E>): R
             if (value !== undefined && key !== except) qb.andWhere(`row.${key} = :${key}`, { [key]: value });
         }
         if (q) {
-            qb.andWhere(`(${options.searchColumns.map((column) => `row.${column} ILIKE :like`).join(" OR ")})`, { like: likePattern(q) });
+            const terms = searchQueryTerms(q);
+            const matches = options.searchColumns.map((column) => `row.${column} ILIKE :like`);
+            // Every word of the query must start a word in the encrypted fields.
+            if (hasSearchIndex() && terms.length) matches.push("row.searchIndex @> ARRAY[:...terms]::text[]");
+            qb.andWhere(matches.length ? `(${matches.join(" OR ")})` : "FALSE", { like: likePattern(q), terms });
         }
         const { start, end } = dayRange(from, to);
         if (start) qb.andWhere(`row.${dateColumn} >= :start`, { start });
@@ -78,9 +86,18 @@ export function adminCrudRouter<E extends ObjectLiteral>(options: Options<E>): R
     router.get("/", async (req, res) => {
         const { page, limit, sort, ...filters } = listQuery.parse(req.query) as z.infer<typeof listQuery> & Filters;
         const [column, direction] = sorts[sort]!;
-        const qb = filtered(filters).orderBy(`row.${column}`, direction).addOrderBy("row.id", direction);
-
         const { skip, take } = toSkipTake({ page, limit });
+
+        if (isEncrypted(column)) {
+            // Ciphertext has no useful order, so the filtered rows are sorted after decrypting.
+            const rows = await filtered(filters).getMany();
+            const sign = direction === "ASC" ? 1 : -1;
+            rows.sort((a, b) => sign * (String(a[column] ?? "").localeCompare(String(b[column] ?? "")) || String(a.id).localeCompare(String(b.id))));
+            res.json(paginated(rows.slice(skip, skip + take).map(serialize), rows.length, { page, limit }));
+            return;
+        }
+
+        const qb = filtered(filters).orderBy(`row.${column}`, direction).addOrderBy("row.id", direction);
         const [items, total] = await qb.skip(skip).take(take).getManyAndCount();
         res.json(paginated(items.map(serialize), total, { page, limit }));
     });

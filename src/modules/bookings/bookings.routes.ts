@@ -112,7 +112,7 @@ export const adminBookingsRouter = adminCrudRouter({
     entity: CallBooking,
     auditEntity: "booking",
     statusEnum: CallBookingStatus,
-    searchColumns: ["name", "email", "notes"],
+    searchColumns: [],
     filters: { service: z.enum(ContactService) },
     groupBy: ["service"],
     // "?from=&to=" select calls by their time, not by when they were requested.

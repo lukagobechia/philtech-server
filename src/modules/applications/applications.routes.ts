@@ -123,7 +123,7 @@ export const adminApplicationsRouter = adminCrudRouter({
     entity: JobApplication,
     auditEntity: "application",
     statusEnum: JobApplicationStatus,
-    searchColumns: ["firstName", "lastName", "email", "jobCode", "jobTitle"],
+    searchColumns: ["jobCode", "jobTitle"],
     filters: {
         jobId: schemas.uuid,
         jobCode,

@@ -1,4 +1,5 @@
 import { Column, Entity, Index } from 'typeorm';
+import { encrypted } from '../lib/field-encryption.js';
 import { BaseEntity } from './base.entity.js';
 import { ContactService } from './contact-message.entity.js';
 import { Locale } from './enums.js';
@@ -23,14 +24,13 @@ export const ACTIVE_BOOKING_STATUSES = [
   where: `"status" IN ('requested', 'confirmed')`,
 })
 export class CallBooking extends BaseEntity {
-  @Column({ type: 'varchar', length: 160 })
+  @Column({ type: 'text', transformer: encrypted })
   name!: string;
 
-  @Index()
-  @Column({ type: 'varchar', length: 320 })
+  @Column({ type: 'text', transformer: encrypted })
   email!: string;
 
-  @Column({ type: 'varchar', length: 32, nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   phone!: string | null;
 
   @Column({ type: 'timestamptz' })
@@ -43,8 +43,13 @@ export class CallBooking extends BaseEntity {
   @Column({ type: 'enum', enum: ContactService, nullable: true })
   service!: ContactService | null;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   notes!: string | null;
+
+  // Blind index for admin search over the encrypted fields, set on save; never returned.
+  @Index('IDX_call_bookings_search_index', { synchronize: false })
+  @Column({ type: 'text', array: true, default: () => "'{}'", select: false })
+  searchIndex!: string[];
 
   @Column({ type: 'enum', enum: Locale, default: Locale.EN })
   locale!: Locale;

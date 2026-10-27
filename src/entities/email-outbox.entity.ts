@@ -1,4 +1,5 @@
 import { Column, Entity, Index } from 'typeorm';
+import { encryptedJson } from '../lib/field-encryption.js';
 import { BaseEntity } from './base.entity.js';
 
 export enum EmailOutboxStatus {
@@ -10,13 +11,14 @@ export enum EmailOutboxStatus {
 @Entity({ name: 'email_outbox' })
 @Index(['status', 'nextAttemptAt'])
 export class EmailOutbox extends BaseEntity {
-  @Column({ type: 'jsonb' })
+  // Recipients and template data hold personal details, so both are encrypted.
+  @Column({ type: 'text', transformer: encryptedJson })
   to!: string[];
 
   @Column({ type: 'varchar', length: 64 })
   template!: string;
 
-  @Column({ type: 'jsonb' })
+  @Column({ type: 'text', transformer: encryptedJson })
   payload!: Record<string, unknown>;
 
   @Column({

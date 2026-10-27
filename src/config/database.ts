@@ -17,6 +17,7 @@ import { JobApplication } from "../entities/job-application.entity.js";
 import { JobTranslation } from "../entities/job-translation.entity.js";
 import { Job } from "../entities/job.entity.js";
 import { OvertimeEntry } from "../entities/overtime-entry.entity.js";
+import { SearchIndexSubscriber } from "../lib/search-index.subscriber.js";
 
 // Resolves to src/migrations/*.ts under tsx and dist/migrations/*.js in production.
 const migrationsGlob = fileURLToPath(
@@ -43,6 +44,7 @@ export const AppDataSource = new DataSource({
         JobTranslation,
         OvertimeEntry,
     ],
+    subscribers: [SearchIndexSubscriber],
     synchronize: false,
     logging: env.NODE_ENV === "development" ? ["error", "warn", "migration"] : ["error"],
     migrations: [migrationsPattern],

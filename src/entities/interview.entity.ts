@@ -1,5 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, type Relation } from 'typeorm';
 import { AdminUser } from './admin-user.entity.js';
+import { encrypted } from '../lib/field-encryption.js';
 import { BaseEntity } from './base.entity.js';
 import { JobApplication } from './job-application.entity.js';
 
@@ -47,7 +48,7 @@ export class Interview extends BaseEntity {
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   attachments!: InterviewAttachment[];
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: 'text', nullable: true, transformer: encrypted })
   notes!: string | null;
 
   @Column({ type: 'enum', enum: InterviewStatus, default: InterviewStatus.SCHEDULED })

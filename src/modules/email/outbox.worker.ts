@@ -2,6 +2,7 @@ import type { DataSource } from "typeorm";
 import { logger } from "../../config/logger.js";
 import { AuditOutcome } from "../../entities/audit-log.entity.js";
 import { EmailOutboxStatus, type EmailOutbox } from "../../entities/email-outbox.entity.js";
+import { decryptJson } from "../../lib/field-encryption.js";
 import { getMailer, type MailAttachment } from "../../lib/mailer.js";
 import { getStorage } from "../../lib/storage.js";
 import { auditedJob, recordAudit } from "../audit/audit.service.js";
@@ -43,7 +44,10 @@ export async function processOutboxBatch(dataSource: DataSource): Promise<number
          )
          RETURNING *`,
         [EmailOutboxStatus.PENDING],
-    ).then(([rows]) => rows);
+    ).then(([rows]: [(Omit<EmailOutbox, "to" | "payload"> & { to: string; payload: string })[]]) =>
+        // Raw rows skip the column transformers, so recipients and payload are still encrypted here.
+        rows.map((row) => ({ ...row, to: decryptJson<string[]>(row.to), payload: decryptJson<Record<string, unknown>>(row.payload) })),
+    );
 
     for (const email of claimed) {
         try {

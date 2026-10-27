@@ -50,7 +50,7 @@ export const adminContactRouter = adminCrudRouter({
     entity: ContactMessage,
     auditEntity: "contact_message",
     statusEnum: ContactMessageStatus,
-    searchColumns: ["name", "email", "company", "message"],
+    searchColumns: [],
     filters: { service: z.enum(ContactService), locale: z.enum(Locale) },
     groupBy: ["service", "locale"],
 });

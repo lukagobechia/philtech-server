@@ -5,6 +5,8 @@ Object.assign(process.env, {
     NODE_ENV: "test",
     DATABASE_URL: inject("databaseUrl"),
     IP_HASH_SECRET: "test-secret-test-secret",
+    DATA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    DATA_INDEX_KEY: "test-index-key-test-index-key-test-index-key",
     CORS_ORIGINS: "http://localhost:3000",
     S3_BUCKET: "test",
     S3_ACCESS_KEY: "test",
@@ -18,6 +20,12 @@ Object.assign(process.env, {
 
 const { AppDataSource } = await import("../src/config/database.js");
 const { resetFakes } = await import("./fakes.js");
+
+// Load migrations through vitest rather than TypeORM's file glob: Node's own loader can't
+// resolve the ".js" imports of src modules that some migrations use.
+// Not eager: eager globs are hoisted above the env setup and would load the real .env.
+const migrationModules = await Promise.all(Object.values(import.meta.glob<Record<string, unknown>>("../src/migrations/*.ts")).map((load) => load()));
+AppDataSource.setOptions({ migrations: migrationModules.flatMap((module) => Object.values(module)) as Function[] });
 
 beforeAll(async () => {
     if (!AppDataSource.isInitialized) await AppDataSource.initialize();
