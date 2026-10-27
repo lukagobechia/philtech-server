@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AppDataSource } from "../src/config/database.js";
 import { Job } from "../src/entities/job.entity.js";
-import { runJobSchedule } from "../src/modules/jobs/jobs.service.js";
+import { companyDate, runJobSchedule } from "../src/modules/jobs/jobs.service.js";
 import { api, loginAs, PDF, seedExpiredJob, seedJob } from "./helpers.js";
 
 describe("public jobs", () => {
@@ -215,7 +215,7 @@ describe("scheduled posting and deadlines", () => {
         ...overrides,
     });
     const inDays = (days: number) => new Date(Date.now() + days * 86400_000);
-    const day = (date: Date) => date.toISOString().slice(0, 10);
+    const day = (date: Date) => companyDate(date);
 
     it("posts a scheduled job at its time and takes it down after the deadline", async () => {
         const agent = await loginAs();
