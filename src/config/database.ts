@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DataSource } from "typeorm";
 import { env } from "./env.js";
@@ -21,6 +22,7 @@ import { OvertimeEntry } from "../entities/overtime-entry.entity.js";
 const migrationsGlob = fileURLToPath(
     new URL(`../migrations/*.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url),
 );
+const migrationsPattern = relative(process.cwd(), migrationsGlob).split(sep).join("/");
 
 export const AppDataSource = new DataSource({
     type: "postgres",
@@ -43,6 +45,6 @@ export const AppDataSource = new DataSource({
     ],
     synchronize: false,
     logging: env.NODE_ENV === "development" ? ["error", "warn", "migration"] : ["error"],
-    migrations: [migrationsGlob],
+    migrations: [migrationsPattern],
     extra: { max: 10 },
 });
