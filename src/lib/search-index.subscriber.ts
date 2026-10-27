@@ -1,4 +1,4 @@
-import type { EntitySubscriberInterface, InsertEvent, ObjectLiteral, UpdateEvent } from "typeorm";
+import { EventSubscriber, type EntitySubscriberInterface, type InsertEvent, type ObjectLiteral, type UpdateEvent } from "typeorm";
 import { CallBooking } from "../entities/call-booking.entity.js";
 import { ContactMessage } from "../entities/contact-message.entity.js";
 import { Employee } from "../entities/employee.entity.js";
@@ -23,6 +23,8 @@ const INDEXED = new Map<unknown, Indexed>([
 ]);
 
 /** Recomputes the blind index whenever the plaintext it is built from is written. */
+// The decorator is required: TypeORM ignores subscriber classes without it.
+@EventSubscriber()
 export class SearchIndexSubscriber implements EntitySubscriberInterface {
     beforeInsert(event: InsertEvent<ObjectLiteral>) {
         if (event.entity) applyIndex(event.metadata.target, event.entity, event.entity, false);

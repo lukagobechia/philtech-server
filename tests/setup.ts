@@ -21,6 +21,11 @@ Object.assign(process.env, {
 const { AppDataSource } = await import("../src/config/database.js");
 const { resetFakes } = await import("./fakes.js");
 
+// Tests TRUNCATE every table, so never let them run against anything but the throwaway container.
+if (AppDataSource.options.url !== inject("databaseUrl")) {
+    throw new Error("Refusing to run tests: DATABASE_URL is not the test container's database");
+}
+
 // Load migrations through vitest rather than TypeORM's file glob: Node's own loader can't
 // resolve the ".js" imports of src modules that some migrations use.
 // Not eager: eager globs are hoisted above the env setup and would load the real .env.
